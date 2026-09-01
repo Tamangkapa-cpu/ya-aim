@@ -1,58 +1,45 @@
-# Я AIᵐ — version 0
+# Я AIᵐ — version 0.1
 
-A simple conversational AI that runs on **iOS, Android, and HarmonyOS**.
+A simple conversational AI for **iOS, Android, and HarmonyOS**.
 
 - Logo: **Я**
-- Memory is local
-- Chat log can be downloaded
-- Works **online or offline**
-- Built to **gain functions** without rewriting the core
+- **Offline from the first launch**
+- The **creator mints** the Essence of the model
+- A minted Essence is **downloadable at any time** from the local vault
+- Chat logs download as `.txt` `.md` `.json`
+- Functions can be added later without rewriting the shell
 
 Repo: https://github.com/Tamangkapa-cpu/ya-aim
 
-## What v0 is
+## Offline first
 
-v0 is a working app, not a demo slide.
+Talk, memory, mint, and download do not call a server. A network can exist. The app does not need it.
 
-| Capability | v0 |
-|---|---|
-| Text chat | Yes |
-| Persistent memory | Yes (device storage) |
-| Download chat log | `.txt` `.md` `.json` |
-| Offline | Yes — local engine + memory |
-| Online | Optional — attach an API later |
-| Evolve | Function registry. New abilities register themselves |
+## Essence
 
-v0’s “model” is a **local memory engine**. It recalls what you said, keeps a profile, and answers from that. A full on-device LLM is a later function you drop in — the chat shell does not change.
+You are the creator.
 
-## Run it now
+1. Use the model. It remembers on this device.
+2. Tap **Mint Essence** (or say “mint”).
+3. The app signs the model with a key generated on this device.
+4. The sealed file is stored in the **Vault**.
+5. Download that mint again whenever you want. No account. No cloud.
 
-Open `web/index.html` in a browser.
+The private key never leaves the device.
 
-Or serve it:
+## Run
 
 ```bash
 cd web
 python3 -m http.server 8080
 ```
 
-Then visit `http://localhost:8080`.
+Open `http://localhost:8080`. Add to Home Screen for app-like use.
 
-Add to Home Screen on iOS / Android / Harmony to use it like an app. It works without a network after the first load if you host it with a service worker (included).
-
-## Native wrappers
-
-- **iOS / Android:** wrap `web/` with Capacitor or open the Flutter shell in `flutter/`
-- **HarmonyOS:** load the same PWA in a Web component, or port the Flutter shell
-
-The product logic lives in `web/app.js`. Keep that file as the source of truth for v0 behavior.
-
-## Project layout
+## Layout
 
 ```
-ya-aim/
-  README.md
-  docs/architecture.md
-  web/                 ← runnable v0
-  flutter/             ← native shell skeleton
+web/                 runnable app
+docs/architecture.md
+flutter/             native shell stub
 ```

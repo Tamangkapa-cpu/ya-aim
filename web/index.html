@@ -37,18 +37,22 @@
   <aside class="panel" id="panel">
     <div class="sheet">
       <h2>Я</h2>
-      <p class="lead">Memory stays on this device. Logs leave only when you download them.</p>
+      <p class="lead">Offline from the start. You mint the Essence. You download it whenever you want.</p>
 
       <label class="field">Your name
         <input id="name-input" />
       </label>
+      <p class="lead">Creator key <span id="creator-id">…</span> — generated on this device, never sent.</p>
 
       <div class="downloads">
+        <button id="mint-now">Mint Essence</button>
         <button id="dl-txt">Log .txt</button>
         <button id="dl-md">Log .md</button>
         <button id="dl-json">Log .json</button>
-        <button id="dl-essence">Essence</button>
       </div>
+
+      <h3 style="margin: 8px 0 4px; font-weight: 500;">Vault</h3>
+      <div id="vault-list"></div>
 
       <h3 style="margin: 8px 0 4px; font-weight: 500;">Functions</h3>
       <div id="fn-list"></div>

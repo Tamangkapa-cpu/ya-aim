@@ -1,80 +1,42 @@
-# Я AIᵐ architecture — v0
+# Я AIᵐ architecture — v0.1
 
-## Principle
+## Law
 
-The app must still talk if the cable is cut.
+1. The app runs offline from the first launch.
+2. The creator of a model mints its Essence.
+3. A minted Essence can be downloaded again at any time from the local vault.
+4. A network is never required for talk, memory, mint, or download.
 
-```
-[ UI ]
-   |
-[ Session  ]  ← messages in this chat
-   |
-[ Memory   ]  ← durable facts, profile, past turns
-   |
-[ Engine   ]  ← local responder (v0) / model adapter (later)
-   |
-[ Functions]  ← empty registry that grows
-```
+## Offline from the start
 
-Online is an *adapter*, not the spine.
+No feature waits on a server.
+
+- UI, engine, memory, mint, and vault live in the page and localStorage.
+- A service worker caches the app shell.
+- model.remote exists only as a later optional function.
 
 ## Essence
 
-An Essence is everything that makes *this* Я instance itself:
+Portable soul of this model instance:
 
-- profile name
-- memories
-- function list
-- chat archives
+- model id, name, engine
+- creator public key
+- profile, memories, functions, chat archive
+- ECDSA P-256 signature over stable JSON
 
-v0 stores Essence in the browser (`localStorage` + structured JSON export).
-Later versions mint Essence as a signed file the creator can re-download.
+Minting uses Web Crypto on-device. The private key never leaves the device.
 
-## Function registry
+working copy --mint--> signed Essence --store--> vault --download anytime--> .json
 
-Each function is:
+The vault keeps the last 50 mints.
 
-```json
-{
-  "id": "export.log",
-  "name": "Export log",
-  "enabled": true,
-  "version": "0.0.1"
-}
-```
+## Creator
 
-v0 ships with:
+On first run the app generates a P-256 keypair stored under ya-aim-creator.
+Resetting the working chat does not destroy the creator key or the vault.
 
-- `chat.send`
-- `memory.remember`
-- `memory.recall`
-- `log.download`
-- `essence.export`
+## Functions
 
-Disabled stubs ready to grow:
+Always on: chat.send, memory.remember, memory.recall, log.download, essence.mint, essence.download
 
-- `model.local` — on-device weights
-- `model.remote` — optional API
-- `voice.listen`
-- `voice.speak`
-
-Enable a stub and implement its handler. The chat loop already asks the registry before it answers.
-
-## Offline / online
-
-| Mode | Behavior |
-|---|---|
-| Offline | Local engine only. Memory still works. Logs still export. |
-| Online | Same engine. Remote model function may run *if enabled and reachable*. If it fails, fall back local. |
-
-No feature in v0 requires the network.
-
-## Platforms
-
-Same web core:
-
-- iOS Safari / Home Screen
-- Android Chrome / TWA
-- HarmonyOS Web / WebView
-
-Flutter shell in `flutter/` is a blank native window pointed at the same ideas for a later compile.
+Stubs: model.local, model.remote, voice.listen, voice.speak

@@ -1,4 +1,4 @@
-const CACHE = "ya-aim-v0";
+const CACHE = "ya-aim-v0-1";
 const ASSETS = [
   "./",
   "./index.html",
