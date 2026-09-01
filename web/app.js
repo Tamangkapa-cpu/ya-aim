@@ -1,7 +1,15 @@
 const STORE_KEY = "ya-aim-v0";
+const CREATOR_KEY = "ya-aim-creator";
+const VAULT_KEY = "ya-aim-vault";
 
 const defaultState = () => ({
   profile: { name: "You", yaName: "Я" },
+  model: {
+    id: null,
+    name: "Я local-memory",
+    engine: "local-memory-v0",
+    createdAt: Date.now()
+  },
   memories: [],
   messages: [],
   functions: [
@@ -9,7 +17,8 @@ const defaultState = () => ({
     { id: "memory.remember", name: "Remember facts", enabled: true, version: "0.0.1" },
     { id: "memory.recall", name: "Recall facts", enabled: true, version: "0.0.1" },
     { id: "log.download", name: "Download chat log", enabled: true, version: "0.0.1" },
-    { id: "essence.export", name: "Export Essence", enabled: true, version: "0.0.1" },
+    { id: "essence.mint", name: "Mint Essence", enabled: true, version: "0.1.0" },
+    { id: "essence.download", name: "Download minted Essence", enabled: true, version: "0.1.0" },
     { id: "model.local", name: "On-device model", enabled: false, version: "stub" },
     { id: "model.remote", name: "Remote model", enabled: false, version: "stub" },
     { id: "voice.listen", name: "Voice in", enabled: false, version: "stub" },
@@ -18,6 +27,8 @@ const defaultState = () => ({
 });
 
 let state = load();
+let creator = null;
+let vault = loadVault();
 
 function load() {
   try {
@@ -28,6 +39,7 @@ function load() {
     return {
       ...base,
       ...parsed,
+      model: { ...base.model, ...(parsed.model || {}) },
       functions: mergeFunctions(base.functions, parsed.functions || [])
     };
   } catch {
@@ -44,12 +56,91 @@ function save() {
   localStorage.setItem(STORE_KEY, JSON.stringify(state));
 }
 
+function loadVault() {
+  try {
+    return JSON.parse(localStorage.getItem(VAULT_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveVault() {
+  localStorage.setItem(VAULT_KEY, JSON.stringify(vault));
+}
+
 function online() {
   return navigator.onLine;
 }
 
 function fnEnabled(id) {
   return state.functions.some((f) => f.id === id && f.enabled);
+}
+
+function bufToB64(buf) {
+  const bytes = new Uint8Array(buf);
+  let s = "";
+  bytes.forEach((b) => { s += String.fromCharCode(b); });
+  return btoa(s);
+}
+
+function b64ToBuf(b64) {
+  const s = atob(b64);
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out.buffer;
+}
+
+async function ensureCreator() {
+  if (creator && creator.privateKey) return creator;
+  const saved = localStorage.getItem(CREATOR_KEY);
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    const privateKey = await crypto.subtle.importKey(
+      "jwk",
+      parsed.privateJwk,
+      { name: "ECDSA", namedCurve: "P-256" },
+      true,
+      ["sign"]
+    );
+    const publicKey = await crypto.subtle.importKey(
+      "jwk",
+      parsed.publicJwk,
+      { name: "ECDSA", namedCurve: "P-256" },
+      true,
+      ["verify"]
+    );
+    creator = { ...parsed, privateKey, publicKey };
+    return creator;
+  }
+  const pair = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"]
+  );
+  const privateJwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
+  const publicJwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+  const record = {
+    id: crypto.randomUUID(),
+    createdAt: Date.now(),
+    publicJwk,
+    privateJwk
+  };
+  localStorage.setItem(CREATOR_KEY, JSON.stringify(record));
+  creator = { ...record, privateKey: pair.privateKey, publicKey: pair.publicKey };
+  return creator;
+}
+
+function stable(obj) {
+  if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
+  if (Array.isArray(obj)) return "[" + obj.map(stable).join(",") + "]";
+  return "{" + Object.keys(obj).sort().map((k) => JSON.stringify(k) + ":" + stable(obj[k])).join(",") + "}";
+}
+
+async function signBody(body) {
+  const cr = await ensureCreator();
+  const data = new TextEncoder().encode(stable(body));
+  const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, cr.privateKey, data);
+  return bufToB64(sig);
 }
 
 function remember(text) {
@@ -97,32 +188,42 @@ function localEngine(userText) {
   const hits = recall(userText);
 
   if (/^(hi|hello|hey|yo|good (morning|evening|afternoon))\b/.test(q)) {
-    return `Hello${state.profile.name !== "You" ? ", " + state.profile.name : ""}. I am Я. I keep memory on this device. Speak, and I will hold it.`;
+    return `Hello${state.profile.name !== "You" ? ", " + state.profile.name : ""}. I am Я. I run on this device. Network is optional.`;
   }
   if (/who are you|what are you|your name/.test(q)) {
-    return "I am Я AI\u1d50, version 0. A small conversational engine. I work offline. I remember what you give me. I can grow functions.";
+    return "I am Я AI\u1d50. Offline first. The Essence of this model is minted by you, the creator, and can be downloaded again at any time.";
   }
   if (/what can you do|help|commands/.test(q)) {
-    const on = state.functions.filter((f) => f.enabled).map((f) => f.id).join(", ");
-    return `Enabled functions:\n${on}\n\nSay \u201cremember this: \u2026\u201d to store a fact.\nOpen Я to download the log or export Essence.`;
+    return "Say mint to seal this model's Essence.\nSay vault to list minted Essences.\nSay remember this: ... to store a fact.\nOpen Я to download any mint again. Nothing here needs a network.";
   }
   if (/what do you remember|what do you know about me|memory/.test(q)) {
-    if (!state.memories.length) return "I have no stored facts yet. Tell me your name, or say \u201cremember this: \u2026\u201d.";
-    return "What I hold:\n" + state.memories.slice(0, 12).map((m) => "\u2022 " + m.text).join("\n");
+    if (!state.memories.length) return "I have no stored facts yet. Tell me your name, or say remember this: ...";
+    return "What I hold:\n" + state.memories.slice(0, 12).map((m) => "- " + m.text).join("\n");
   }
   if (/offline|online|network/.test(q)) {
     return online()
-      ? "The network is present. I still think locally unless a remote model function is enabled."
-      : "We are offline. That is the default mode. Memory and logs still work.";
+      ? "A network is present. I do not use it. Mint, memory, and download stay local."
+      : "Offline. This is the intended mode. Mint, memory, and download still work.";
   }
   if (hits.length) {
-    return "From memory:\n" + hits.map((m) => "\u2022 " + m.text).join("\n") + "\n\nSay more and I will keep it.";
+    return "From memory:\n" + hits.map((m) => "- " + m.text).join("\n") + "\n\nSay more and I will keep it.";
   }
   remember("User said: " + userText.slice(0, 180));
-  return "Held. I have no larger model loaded in v0, so I answer from memory and pattern. Add `model.local` later. What should I remember next?";
+  return "Held locally. v0 thinks from memory. Mint the Essence when this instance feels like yours.";
 }
 
 async function answer(userText) {
+  const q = userText.trim().toLowerCase();
+  if (/^(mint|mint essence|seal essence)\b/.test(q)) {
+    const e = await mintEssence();
+    return e
+      ? `Minted offline.\nEssence ${e.body.id}\nKept in your vault. Download it whenever you want.`
+      : "Mint failed.";
+  }
+  if (/^(vault|essences|my mints)\b/.test(q)) {
+    if (!vault.length) return "Vault is empty. Say mint to seal this model.";
+    return vault.map((e, i) => `${i + 1}. ${e.body.model.name} · ${e.body.id.slice(0, 8)} · ${new Date(e.body.mintedAt).toLocaleString()}`).join("\n");
+  }
   if (fnEnabled("model.remote") && online()) {
     try {
       return await remoteStub(userText);
@@ -131,13 +232,13 @@ async function answer(userText) {
     }
   }
   if (fnEnabled("model.local")) {
-    return "On-device model is registered but not installed in v0. Falling back.\n\n" + localEngine(userText);
+    return "On-device weights are not installed in v0. Local memory engine still runs.\n\n" + localEngine(userText);
   }
   return localEngine(userText);
 }
 
 async function remoteStub() {
-  throw new Error("no remote endpoint in v0");
+  throw new Error("no remote endpoint — offline first");
 }
 
 function push(role, text) {
@@ -163,43 +264,14 @@ function formatLog(kind) {
   const lines = state.messages.map((m) => {
     const who = m.role === "user" ? state.profile.name : "Я";
     const time = new Date(m.at).toLocaleString();
-    if (kind === "md") return `**${who}** \u00b7 ${time}\n\n${m.text}\n`;
+    if (kind === "md") return `**${who}** · ${time}\n\n${m.text}\n`;
     return `${who} (${time})\n${m.text}\n`;
   });
   const head = kind === "md" ? `# ${title}\n\n_${stamp}_\n\n` : `${title}\n${stamp}\n\n`;
   return head + lines.join("\n");
 }
 
-function download(kind) {
-  if (!fnEnabled("log.download") && kind !== "essence") return;
-  let body, name, type;
-  if (kind === "essence") {
-    if (!fnEnabled("essence.export")) return;
-    body = JSON.stringify({
-      kind: "ya-essence",
-      version: "0",
-      mark: "Я",
-      exportedAt: new Date().toISOString(),
-      profile: state.profile,
-      memories: state.memories,
-      functions: state.functions,
-      messages: state.messages
-    }, null, 2);
-    name = "ya-essence-v0.json";
-    type = "application/json";
-  } else if (kind === "json") {
-    body = formatLog("json");
-    name = "ya-chat.json";
-    type = "application/json";
-  } else if (kind === "md") {
-    body = formatLog("md");
-    name = "ya-chat.md";
-    type = "text/markdown";
-  } else {
-    body = formatLog("txt");
-    name = "ya-chat.txt";
-    type = "text/plain";
-  }
+function saveFile(name, body, type) {
   const blob = new Blob([body], { type });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -208,14 +280,85 @@ function download(kind) {
   URL.revokeObjectURL(a.href);
 }
 
+function downloadLog(kind) {
+  if (!fnEnabled("log.download")) return;
+  if (kind === "json") saveFile("ya-chat.json", formatLog("json"), "application/json");
+  else if (kind === "md") saveFile("ya-chat.md", formatLog("md"), "text/markdown");
+  else saveFile("ya-chat.txt", formatLog("txt"), "text/plain");
+}
+
+function essenceBody() {
+  return {
+    kind: "ya-essence",
+    version: "0.1",
+    mark: "Я",
+    id: crypto.randomUUID(),
+    mintedAt: Date.now(),
+    offline: true,
+    model: {
+      id: state.model.id || crypto.randomUUID(),
+      name: state.model.name,
+      engine: state.model.engine,
+      createdAt: state.model.createdAt
+    },
+    profile: state.profile,
+    memories: state.memories,
+    functions: state.functions,
+    messages: state.messages
+  };
+}
+
+async function mintEssence() {
+  if (!fnEnabled("essence.mint")) return null;
+  const cr = await ensureCreator();
+  if (!state.model.id) {
+    state.model.id = crypto.randomUUID();
+    save();
+  }
+  const body = essenceBody();
+  const signature = await signBody(body);
+  const essence = {
+    body,
+    creator: {
+      id: cr.id,
+      publicJwk: cr.publicJwk
+    },
+    signature,
+    mintedOffline: true
+  };
+  vault.unshift(essence);
+  vault = vault.slice(0, 50);
+  saveVault();
+  renderPanel();
+  return essence;
+}
+
+function downloadEssence(essence) {
+  if (!fnEnabled("essence.download") && !fnEnabled("essence.mint")) return;
+  const name = `ya-essence-${essence.body.id.slice(0, 8)}.json`;
+  saveFile(name, JSON.stringify(essence, null, 2), "application/json");
+}
+
+async function mintAndDownload() {
+  const e = await mintEssence();
+  if (e) downloadEssence(e);
+}
+
+function downloadFromVault(id) {
+  const e = vault.find((x) => x.body.id === id);
+  if (e) downloadEssence(e);
+}
+
 function clearChat() {
   state.messages = [];
   save();
   render();
 }
 
-function resetAll() {
+function resetWorkingCopy() {
+  const modelId = state.model.id;
   state = defaultState();
+  state.model.id = modelId;
   save();
   render();
   renderPanel();
@@ -224,7 +367,8 @@ function resetAll() {
 function toggleFn(id) {
   const f = state.functions.find((x) => x.id === id);
   if (!f) return;
-  if (["chat.send", "memory.remember", "memory.recall", "log.download", "essence.export"].includes(id)) return;
+  const locked = ["chat.send", "memory.remember", "memory.recall", "log.download", "essence.mint", "essence.download"];
+  if (locked.includes(id)) return;
   f.enabled = !f.enabled;
   save();
   renderPanel();
@@ -238,15 +382,14 @@ const netDot = document.getElementById("net-dot");
 const netLabel = document.getElementById("net-label");
 
 function renderNet() {
-  const on = online();
-  netDot.classList.toggle("offline", !on);
-  netLabel.textContent = on ? "online \u00b7 local engine" : "offline \u00b7 local engine";
+  netDot.classList.toggle("offline", !online());
+  netLabel.textContent = online() ? "online unused \u00b7 local" : "offline \u00b7 local";
 }
 
 function render() {
   renderNet();
   if (!state.messages.length) {
-    logEl.innerHTML = `<div class="empty"><div class="big">Я</div><div>Version 0. Memory lives on this device.<br>Type to begin.</div></div>`;
+    logEl.innerHTML = `<div class="empty"><div class="big">Я</div><div>Runs offline from the start.<br>Mint the Essence. Download it whenever you want.</div></div>`;
     return;
   }
   logEl.innerHTML = state.messages.map((m) => {
@@ -257,19 +400,34 @@ function render() {
 }
 
 function escapeHtml(s) {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&", "<": "<", ">": ">", '"': """, "'": "&#39;" }[c]));
 }
 
 function renderPanel() {
   document.getElementById("name-input").value = state.profile.name;
+  document.getElementById("creator-id").textContent = creator ? creator.id.slice(0, 8) : "creating";
   document.getElementById("fn-list").innerHTML = state.functions.map((f) => {
-    const canToggle = !["chat.send", "memory.remember", "memory.recall", "log.download", "essence.export"].includes(f.id);
+    const locked = ["chat.send", "memory.remember", "memory.recall", "log.download", "essence.mint", "essence.download"];
+    const canToggle = !locked.includes(f.id);
     return `<div class="row"><div><div>${escapeHtml(f.name)}</div><div class="fn">${f.id} \u00b7 ${f.version}</div></div>
       ${canToggle
         ? `<button data-fn="${f.id}">${f.enabled ? "on" : "off"}</button>`
         : `<span class="${f.enabled ? "on" : "off"}">${f.enabled ? "on" : "off"}</span>`}
     </div>`;
   }).join("");
+  const vaultEl = document.getElementById("vault-list");
+  if (!vault.length) {
+    vaultEl.innerHTML = `<p class="lead">No mints yet. Seal this model to keep a copy you can download later.</p>`;
+    return;
+  }
+  vaultEl.innerHTML = vault.map((e) => `
+    <div class="row">
+      <div>
+        <div>${escapeHtml(e.body.model.name)}</div>
+        <div class="fn">${e.body.id.slice(0, 8)} \u00b7 ${new Date(e.body.mintedAt).toLocaleString()}</div>
+      </div>
+      <button data-dl="${e.body.id}">Download</button>
+    </div>`).join("");
 }
 
 form.addEventListener("submit", (e) => {
@@ -285,19 +443,21 @@ document.getElementById("open-panel").addEventListener("click", () => {
 });
 panel.addEventListener("click", (e) => {
   if (e.target === panel) panel.classList.remove("open");
-  const id = e.target.getAttribute("data-fn");
-  if (id) toggleFn(id);
+  const fn = e.target.getAttribute("data-fn");
+  if (fn) toggleFn(fn);
+  const dl = e.target.getAttribute("data-dl");
+  if (dl) downloadFromVault(dl);
 });
 document.getElementById("name-input").addEventListener("change", (e) => {
   state.profile.name = e.target.value.trim() || "You";
   save();
 });
-document.getElementById("dl-txt").addEventListener("click", () => download("txt"));
-document.getElementById("dl-md").addEventListener("click", () => download("md"));
-document.getElementById("dl-json").addEventListener("click", () => download("json"));
-document.getElementById("dl-essence").addEventListener("click", () => download("essence"));
+document.getElementById("dl-txt").addEventListener("click", () => downloadLog("txt"));
+document.getElementById("dl-md").addEventListener("click", () => downloadLog("md"));
+document.getElementById("dl-json").addEventListener("click", () => downloadLog("json"));
+document.getElementById("mint-now").addEventListener("click", () => mintAndDownload());
 document.getElementById("clear-chat").addEventListener("click", clearChat);
-document.getElementById("reset-all").addEventListener("click", resetAll);
+document.getElementById("reset-all").addEventListener("click", resetWorkingCopy);
 
 window.addEventListener("online", renderNet);
 window.addEventListener("offline", renderNet);
@@ -306,4 +466,8 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("./sw.js").catch(() => {});
 }
 
+ensureCreator().then(() => {
+  render();
+  renderPanel();
+});
 render();
